@@ -5,44 +5,59 @@
  使用想定：システム保守担当者
  
 ## 画面一覧
- 問合せ内容一覧の管理画面
- 　→問い合わせ内容を記載する
- 　　受付担当者を管理、検索する
- 　　問合せの対応状況を管理する
+
+| ファイル | 画面名 | 主な機能 |
+|---|---|---|
+| index.html | 問合せ一覧 | ステータス別集計バー表示、ステータス・担当者での絞り込み、一覧表示、削除 |
+| form.html | 問合せ新規登録 | 受付日・ステータス・担当者・問合せ内容を入力して登録。初回コメントも同時登録可 |
+| detail.html | 問合せ詳細 | 問合せ詳細表示、ステータス変更、担当者変更（自動更新通知付き）、コメント一覧・追加 |
+| assignees.html | 担当者管理 | 担当者一覧表示、新規担当者登録 |
 
 ## APIエンドポイント一覧
-| メソッド | パス                               | 概要                                                            |
-|----------|------------------------------------|-----------------------------------------------------------------|
-|GET       |api/inquiries                       |問い合わせ一覧の取得（ステータスや担当者での絞り込みもできる）   |
-|POST      |api/inquiries                       |新規問い合わせの登録（db_inquiries へのインサート）              |
-|GET       |api/inquiries/:inquiries_no         |特定の問い合わせ詳細と、紐づくコメント一覧の取得                 |
-|PUT       |api/inquiries/:inquiries_no         |ステータスや担当者の変更（db_inquiries の更新）                  |
-|DELETE    |api/inquiries/:inquiries_no         |問い合わせの削除                                                 |
-|POST      |api/inquiries/:inquiries_no/comments|問い合わせへの対応履歴コメントの追加（db_comments への登録）     |
-|GET       |api/assignees                       |担当者の一覧を取得（画面の選択肢用として db_assignees から取得） |
+
+| メソッド | パス | 概要 |
+|---|---|---|
+| GET | /api/inquiries | 問合せ一覧取得。`?status` / `?assignee_id` で絞り込み可 |
+| POST | /api/inquiries | 新規問合せ登録（`inquiries_date` 必須） |
+| GET | /api/inquiries/summary | ステータス別件数＋合計を集計して返す ※C後半追加 |
+| GET | /api/inquiries/:inquiries_no | 問合せ詳細＋コメント一覧を返す |
+| PUT | /api/inquiries/:inquiries_no | ステータス・担当者を更新。担当者アサイン時に未対応→対応中を自動遷移 ※C後半追加 |
+| DELETE | /api/inquiries/:inquiries_no | 問合せ削除（コメントは CASCADE で連鎖削除） |
+| POST | /api/inquiries/:inquiries_no/comments | コメント追加（`comments`・`inquiries_date` 必須） |
+| GET | /api/assignees | 担当者一覧取得 |
+| POST | /api/assignees | 担当者新規登録（`assignees_name` 必須） ※C後半追加 |
 
 ## DBテーブル設計
- テーブル名：db_inquiries
- カラム名・型・制約：
- inquiries_date, DATE, NOT NULL
- inquiries_no, int, PRIMARY KEY
- status, VARCHAR(50), NOT NULL
- assignees, VARCHAR(100), NOT NULL
- insert_date, DATETIME, NOT NULL
- update_date, DATETIME, NOT NULL
- 
- テーブル名：db_comments
- カラム名・型・制約：
- inquiries_date, DATE, NOT NULL
- inquiries_no, int, PRIMARY KEY
- comments, VARCHAR(100), NOT NULL
- insert_date, DATETIME, NOT NULL
- 
- テーブル名：db_assignees
- カラム名・型・制約：
- assignees_id, int, PRIMARY KEY
- assignees_name, VARCHAR(100), NOT NULL
- 
+
+### db_assignees（担当者マスタ）
+
+| カラム名 | 型 | 制約 |
+|---|---|---|
+| assignees_id | SERIAL | PRIMARY KEY |
+| assignees_name | VARCHAR(100) | NOT NULL, UNIQUE |
+
+### db_inquiries（問合せ）
+
+| カラム名 | 型 | 制約 |
+|---|---|---|
+| inquiries_no | SERIAL | PRIMARY KEY |
+| inquiries_date | DATE | NOT NULL |
+| status | VARCHAR(50) | NOT NULL, DEFAULT '未対応', CHECK IN ('未対応','対応中','完了') |
+| assignee_id | INTEGER | NULL, FK → db_assignees(assignees_id) ON DELETE SET NULL |
+| insert_date | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
+| update_date | TIMESTAMPTZ | NOT NULL, DEFAULT NOW()（UPDATE トリガーで自動更新） |
+
+### db_comments（対応履歴コメント）
+
+| カラム名 | 型 | 制約 |
+|---|---|---|
+| comment_id | BIGSERIAL | PRIMARY KEY |
+| inquiries_date | DATE | NOT NULL |
+| inquiries_no | INTEGER | NOT NULL, FK → db_inquiries(inquiries_no) ON DELETE CASCADE |
+| comments | VARCHAR(100) | NOT NULL |
+| insert_date | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
+
+
 
 ## 状態遷移
 [未対応]（新規登録時の初期状態）対応を開始すると [対応中] に遷移
