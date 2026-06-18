@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>問合せ新規登録</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="index.html">← 一覧に戻る</a>
+  <h1>問合せ新規登録</h1>
+
+  <!-- エラーメッセージ表示エリア -->
+  <p id="error-msg" class="error-msg"></p>
+
+  <div class="form-card">
+    <form id="inquiry-form" novalidate>
+
+      <div class="form-group">
+        <label for="inquiries-date">受付日 <span style="color:#c0392b">*</span></label>
+        <input type="date" id="inquiries-date" required>
+      </div>
+
+      <div class="form-group">
+        <label for="status">ステータス</label>
+        <select id="status">
+          <option value="未対応" selected>未対応</option>
+          <option value="対応中">対応中</option>
+          <option value="完了">完了</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="assignee-id">担当者</label>
+        <select id="assignee-id">
+          <option value="">担当者未定</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="inquiry-content">問合せ内容</label>
+        <textarea id="inquiry-content" maxlength="100"
+          placeholder="問合せの内容を入力してください（100文字以内）"></textarea>
+        <small style="color:#888">入力した内容は登録後に対応履歴として保存されます</small>
+      </div>
+
+      <button type="submit" class="btn btn-primary">登録する</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  const errEl = document.getElementById('error-msg');
+
+  function showError(msg) {
+    errEl.textContent = msg;
+  }
+  function clearError() {
+    errEl.textContent = '';
+  }
+
+  // 担当者一覧を取得してセレクトボックスに追加する（失敗時はサイレント）
+  async function loadAssignees() {
+    try {
+      const res = await fetch('/api/assignees');
+      if (!res.ok) return;
+      const data = await res.json();
+      const sel = document.getElementById('assignee-id');
+      data.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.assignees_id;
+        opt.textContent = a.assignees_name;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('担当者一覧取得エラー:', e.message);
+    }
+  }
+
+  // フォーム送信処理
+  document.getElementById('inquiry-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    clearError();
+
+    const inquiries_date   = document.getElementById('inquiries-date').value;
+    const status           = document.getElementById('status').value;
+    const assigneeRaw      = document.getElementById('assignee-id').value;
+    const assignee_id      = assigneeRaw ? Number(assigneeRaw) : null;
+    const inquiryContent   = document.getElementById('inquiry-content').value.trim();
+
+    if (!inquiries_date) {
+      showError('受付日は必須です');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/inquiries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inquiries_date, status, assignee_id }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '登録に失敗しました');
+      }
+
+      const created = await res.json();
+
+      // 問合せ内容が入力されていれば対応履歴コメントとして登録する
+      if (inquiryContent) {
+        await fetch(`/api/inquiries/${created.inquiries_no}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments: inquiryContent, inquiries_date }),
+        }).catch(() => {/* コメント登録失敗は無視して一覧へ進む */});
+      }
+
+      // 登録成功後に一覧画面へ遷移する
+      location.href = 'index.html';
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  // 初期表示
+  loadAssignees();
+</script>
+</body>
+</html>

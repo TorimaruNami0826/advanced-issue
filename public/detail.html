@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>問合せ詳細</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <a class="back-link" href="index.html">← 一覧に戻る</a>
+  <h1>問合せ詳細</h1>
+
+  <!-- エラーメッセージ表示エリア -->
+  <p id="error-msg" class="error-msg"></p>
+
+  <!-- ステータス自動更新通知（自動更新時のみ3秒表示） -->
+  <p id="auto-update-notice" style="color:#27ae60;background:#e8f5e9;border:1px solid #a5d6a7;
+     border-radius:4px;padding:8px 12px;margin:8px 0;display:none;"></p>
+
+  <!-- 詳細情報 -->
+  <div class="detail-card" id="detail-area">
+    <p style="color:#888">読み込み中...</p>
+  </div>
+
+  <!-- ステータス変更フォーム -->
+  <p class="section-title">ステータス変更</p>
+  <div class="form-card">
+    <div class="form-group">
+      <label for="status-select">ステータス</label>
+      <select id="status-select">
+        <option value="未対応">未対応</option>
+        <option value="対応中">対応中</option>
+        <option value="完了">完了</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="btn-update-status">ステータス更新</button>
+  </div>
+
+  <!-- 担当者変更フォーム -->
+  <p class="section-title">担当者変更</p>
+  <div class="form-card">
+    <div class="form-group">
+      <label for="assignee-select">担当者</label>
+      <select id="assignee-select">
+        <option value="">担当者未定</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="btn-update-assignee">担当者更新</button>
+  </div>
+
+  <!-- コメント一覧 -->
+  <p class="section-title">対応履歴</p>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:120px">受付日</th>
+        <th>コメント内容</th>
+        <th style="width:150px">登録日時</th>
+      </tr>
+    </thead>
+    <tbody id="comment-tbody">
+      <tr><td colspan="3" style="text-align:center;color:#888">読み込み中...</td></tr>
+    </tbody>
+  </table>
+
+  <!-- コメント追加フォーム -->
+  <p class="section-title">コメント追加</p>
+  <div class="form-card">
+    <form id="comment-form" novalidate>
+      <div class="form-group">
+        <label for="comment-date">受付日 <span style="color:#c0392b">*</span></label>
+        <input type="date" id="comment-date" required>
+      </div>
+      <div class="form-group">
+        <label for="comment-text">コメント内容 <span style="color:#c0392b">*</span>（100文字以内）</label>
+        <textarea id="comment-text" maxlength="100" required placeholder="対応内容を入力してください"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">コメント追加</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  // URLパラメータから問合せIDを取得する
+  const id = new URLSearchParams(location.search).get('id');
+  const errEl = document.getElementById('error-msg');
+
+  if (!id) {
+    document.getElementById('detail-area').innerHTML =
+      '<p style="color:#c0392b">URLに問合せIDが指定されていません。<a href="index.html">一覧に戻る</a></p>';
+    document.querySelectorAll('.section-title, .form-card, table').forEach(el => el.style.display = 'none');
+  }
+
+  function showError(msg) {
+    errEl.textContent = msg;
+  }
+  function clearError() {
+    errEl.textContent = '';
+  }
+
+  // ステータス自動更新を通知する（3秒後に自動非表示）
+  function showAutoUpdateNotice(msg) {
+    const el = document.getElementById('auto-update-notice');
+    el.textContent = msg;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+
+  // 日付文字列から YYYY-MM-DD を取り出す
+  function toDateStr(val) {
+    if (!val) return '';
+    return String(val).slice(0, 10);
+  }
+
+  // 日時文字列を読みやすい形式に変換する
+  function toDateTimeStr(val) {
+    if (!val) return '';
+    return String(val).replace('T', ' ').slice(0, 19);
+  }
+
+  // ステータスバッジのHTML
+  function badgeHtml(status) {
+    const s = escapeHtml(status);
+    return `<span class="badge badge-${s}">${s}</span>`;
+  }
+
+  // 詳細情報エリアを描画する
+  function renderDetail(data) {
+    document.getElementById('detail-area').innerHTML = `
+      <dl>
+        <dt>問合せNo</dt><dd>${data.inquiries_no}</dd>
+        <dt>受付日</dt><dd>${toDateStr(data.inquiries_date)}</dd>
+        <dt>ステータス</dt><dd>${badgeHtml(data.status)}</dd>
+        <dt>担当者</dt><dd>${escapeHtml(data.assignees_name || '未アサイン')}</dd>
+        <dt>登録日時</dt><dd>${toDateTimeStr(data.insert_date)}</dd>
+        <dt>更新日時</dt><dd>${toDateTimeStr(data.update_date)}</dd>
+      </dl>
+    `;
+
+    // ステータスセレクトの初期値を現在値に合わせる
+    document.getElementById('status-select').value = data.status;
+
+    // 担当者セレクトの初期値を現在値に合わせる
+    if (data.assignee_id) {
+      document.getElementById('assignee-select').value = data.assignee_id;
+    } else {
+      document.getElementById('assignee-select').value = '';
+    }
+  }
+
+  // コメント一覧テーブルを描画する
+  function renderComments(comments) {
+    const tbody = document.getElementById('comment-tbody');
+    if (!comments || comments.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#888">コメントはありません</td></tr>';
+      return;
+    }
+    tbody.innerHTML = comments.map(c => `
+      <tr>
+        <td>${toDateStr(c.inquiries_date)}</td>
+        <td style="white-space:pre-wrap">${escapeHtml(c.comments)}</td>
+        <td>${toDateTimeStr(c.insert_date)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // XSS対策のHTMLエスケープ
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // 問合せ詳細を取得して画面を更新する
+  async function loadDetail() {
+    try {
+      const res = await fetch(`/api/inquiries/${id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '詳細の取得に失敗しました');
+      }
+      const data = await res.json();
+      renderDetail(data);
+      renderComments(data.comments);
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  // 担当者一覧を取得してセレクトボックスに追加する（失敗時はサイレント）
+  async function loadAssignees() {
+    try {
+      const res = await fetch('/api/assignees');
+      if (!res.ok) return;
+      const data = await res.json();
+      const sel = document.getElementById('assignee-select');
+      data.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.assignees_id;
+        opt.textContent = a.assignees_name;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('担当者一覧取得エラー:', e.message);
+    }
+  }
+
+  // ステータス更新ボタン
+  document.getElementById('btn-update-status').addEventListener('click', async () => {
+    clearError();
+    const status = document.getElementById('status-select').value;
+    try {
+      const res = await fetch(`/api/inquiries/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'ステータスの更新に失敗しました');
+      }
+      await loadDetail();
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  // 担当者更新ボタン
+  document.getElementById('btn-update-assignee').addEventListener('click', async () => {
+    clearError();
+    const raw = document.getElementById('assignee-select').value;
+    const assignee_id = raw ? Number(raw) : null;
+
+    // 更新前のステータスを取得する（自動更新通知の判定用）
+    const prevStatusEl = document.querySelector('#detail-area .badge');
+    const prevStatus = prevStatusEl ? prevStatusEl.textContent.trim() : null;
+
+    try {
+      const res = await fetch(`/api/inquiries/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee_id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '担当者の更新に失敗しました');
+      }
+      const data = await res.json();
+      await loadDetail();
+
+      // 未対応 → 対応中 に自動遷移した場合のみ通知を表示する
+      if (prevStatus === '未対応' && data.status === '対応中') {
+        showAutoUpdateNotice('担当者をアサインしたため、ステータスを「対応中」に自動更新しました');
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  // コメント追加フォーム
+  document.getElementById('comment-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    clearError();
+
+    const inquiries_date = document.getElementById('comment-date').value;
+    const comments       = document.getElementById('comment-text').value.trim();
+
+    if (!inquiries_date) { showError('受付日は必須です'); return; }
+    if (!comments)       { showError('コメント内容は必須です'); return; }
+    if (comments.length > 100) { showError('コメントは100文字以内で入力してください'); return; }
+
+    try {
+      const res = await fetch(`/api/inquiries/${id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comments, inquiries_date }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'コメントの追加に失敗しました');
+      }
+      // フォームをリセットしてコメント一覧を再取得する
+      document.getElementById('comment-form').reset();
+      await loadDetail();
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  // 初期表示（詳細と担当者一覧を並行取得する）
+  if (id) {
+    Promise.all([loadDetail(), loadAssignees()]);
+  }
+</script>
+</body>
+</html>

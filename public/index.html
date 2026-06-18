@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>問合せ一覧</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <div class="page-header">
+    <h1>問合せ一覧</h1>
+    <div style="display:flex;gap:8px;">
+      <a class="btn btn-secondary" href="assignees.html">担当者管理</a>
+      <a class="btn btn-primary" href="form.html">＋ 新規登録</a>
+    </div>
+  </div>
+
+  <!-- エラーメッセージ表示エリア -->
+  <p id="error-msg" class="error-msg"></p>
+
+  <!-- 集計サマリーバー -->
+  <div id="summary-bar" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+    <div style="background:#fdecea;padding:10px 18px;border-radius:6px;flex:1;min-width:90px;text-align:center;">
+      <div style="font-size:11px;color:#888;margin-bottom:4px;">未対応</div>
+      <div id="count-未対応" style="font-size:26px;font-weight:700;color:#c0392b;">-</div>
+    </div>
+    <div style="background:#fff3e0;padding:10px 18px;border-radius:6px;flex:1;min-width:90px;text-align:center;">
+      <div style="font-size:11px;color:#888;margin-bottom:4px;">対応中</div>
+      <div id="count-対応中" style="font-size:26px;font-weight:700;color:#e67e22;">-</div>
+    </div>
+    <div style="background:#e8f5e9;padding:10px 18px;border-radius:6px;flex:1;min-width:90px;text-align:center;">
+      <div style="font-size:11px;color:#888;margin-bottom:4px;">完了</div>
+      <div id="count-完了" style="font-size:26px;font-weight:700;color:#27ae60;">-</div>
+    </div>
+    <div style="background:#e3f2fd;padding:10px 18px;border-radius:6px;flex:1;min-width:90px;text-align:center;">
+      <div style="font-size:11px;color:#888;margin-bottom:4px;">合計</div>
+      <div id="count-total" style="font-size:26px;font-weight:700;color:#1565c0;">-</div>
+    </div>
+  </div>
+
+  <!-- 絞り込みフォーム -->
+  <div class="filter-bar">
+    <div class="form-group">
+      <label for="filter-status">ステータス</label>
+      <select id="filter-status">
+        <option value="">すべて</option>
+        <option value="未対応">未対応</option>
+        <option value="対応中">対応中</option>
+        <option value="完了">完了</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="filter-assignee">担当者</label>
+      <select id="filter-assignee">
+        <option value="">すべて</option>
+      </select>
+    </div>
+    <button class="btn btn-secondary" id="btn-filter">絞り込む</button>
+  </div>
+
+  <!-- 一覧テーブル -->
+  <table id="inquiry-table">
+    <thead>
+      <tr>
+        <th>問合せNo</th>
+        <th>受付日</th>
+        <th>ステータス</th>
+        <th>担当者</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="inquiry-tbody">
+      <tr><td colspan="5" style="text-align:center;color:#888;">読み込み中...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  const errEl = document.getElementById('error-msg');
+
+  // エラーメッセージを表示する
+  function showError(msg) {
+    errEl.textContent = msg;
+  }
+  function clearError() {
+    errEl.textContent = '';
+  }
+
+  // 担当者一覧を取得してセレクトボックスに追加する（失敗時はサイレント）
+  async function loadAssignees() {
+    try {
+      const res = await fetch('/api/assignees');
+      if (!res.ok) return;
+      const data = await res.json();
+      const sel = document.getElementById('filter-assignee');
+      data.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.assignees_id;
+        opt.textContent = a.assignees_name;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('担当者一覧取得エラー:', e.message);
+    }
+  }
+
+  // 集計APIを呼んでサマリーバーを更新する（失敗時はサイレント）
+  async function loadSummary() {
+    try {
+      const res = await fetch('/api/inquiries/summary');
+      if (!res.ok) return;
+      const d = await res.json();
+      document.getElementById('count-未対応').textContent = d['未対応'] ?? 0;
+      document.getElementById('count-対応中').textContent = d['対応中'] ?? 0;
+      document.getElementById('count-完了').textContent   = d['完了']   ?? 0;
+      document.getElementById('count-total').textContent  = d.total     ?? 0;
+    } catch (e) {
+      console.warn('集計取得エラー:', e.message);
+    }
+  }
+
+  // XSS対策のHTMLエスケープ
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // テーブル行にステータスバッジを生成する
+  function badgeHtml(status) {
+    const s = escapeHtml(status);
+    return `<span class="badge badge-${s}">${s}</span>`;
+  }
+
+  // 問合せ一覧を取得して表形式で描画する（エラーはテーブル内に表示）
+  async function loadInquiries() {
+    const tbody = document.getElementById('inquiry-tbody');
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">読み込み中...</td></tr>';
+
+    const status = document.getElementById('filter-status').value;
+    const assigneeId = document.getElementById('filter-assignee').value;
+
+    const params = new URLSearchParams();
+    if (status)     params.set('status', status);
+    if (assigneeId) params.set('assignee_id', assigneeId);
+
+    const url = '/api/inquiries' + (params.toString() ? '?' + params : '');
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '一覧の取得に失敗しました');
+      }
+      const data = await res.json();
+      renderTable(data);
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#c0392b;">${e.message}</td></tr>`;
+    }
+  }
+
+  // テーブルの tbody を再描画する
+  function renderTable(rows) {
+    const tbody = document.getElementById('inquiry-tbody');
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;">該当する問合せはありません</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${r.inquiries_no}</td>
+        <td>${r.inquiries_date ? r.inquiries_date.slice(0, 10) : ''}</td>
+        <td>${badgeHtml(r.status)}</td>
+        <td>${escapeHtml(r.assignees_name || '未アサイン')}</td>
+        <td class="actions">
+          <a class="btn btn-primary" href="detail.html?id=${r.inquiries_no}">詳細</a>
+          <button class="btn btn-danger" data-id="${r.inquiries_no}">削除</button>
+        </td>
+      </tr>
+    `).join('');
+
+    // 削除ボタンにイベントを紐付ける
+    tbody.querySelectorAll('button[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => deleteInquiry(Number(btn.dataset.id)));
+    });
+  }
+
+  // 問合せを削除する
+  async function deleteInquiry(id) {
+    if (!confirm(`問合せNo ${id} を削除しますか？\nこの操作は元に戻せません。`)) return;
+    clearError();
+    try {
+      const res = await fetch(`/api/inquiries/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '削除に失敗しました');
+      }
+      await loadInquiries();
+      loadSummary();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  // 絞り込みボタン
+  document.getElementById('btn-filter').addEventListener('click', loadInquiries);
+
+  // 初期表示
+  loadAssignees();
+  loadInquiries();
+  loadSummary();
+</script>
+</body>
+</html>
